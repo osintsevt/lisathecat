@@ -45,6 +45,20 @@ h1 span{color:var(--amber)}
 .extra b{color:var(--paper)}
 button.call{font-family:var(--body);font-weight:600;font-size:12px;padding:5px 10px;border-radius:999px;background:#262231;color:var(--paper);border:1.5px solid var(--amber)}
 button.call:disabled{opacity:.45;cursor:default;border-color:var(--wall-top)}
+.lbwrap{border-top:1.5px solid var(--wall);margin-top:14px;padding-top:12px}
+.lbwrap[hidden]{display:none}
+.lbwrap label{display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:13px;color:var(--muted)}
+.lbwrap input{flex:1;min-width:140px;font:inherit;font-size:15px;color:var(--paper);background:var(--wall);border:1.5px solid var(--wall-top);border-radius:8px;padding:7px 10px}
+.lbwrap input:focus-visible{outline:2px solid var(--amber);outline-offset:1px}
+.lbstatus{font-size:13px;color:var(--amber);min-height:1.2em;margin:6px 0 0}
+.lbtitle{font-family:var(--display);font-weight:800;font-size:14px;margin:10px 0 6px}
+.lb{list-style:none;margin:0;padding:0;font-size:14px;color:var(--paper);font-variant-numeric:tabular-nums}
+.lb li{display:grid;grid-template-columns:1.6em 1fr auto;gap:8px;padding:3px 0;border-bottom:1px solid var(--wall)}
+.lb li span:first-child{color:var(--muted)}
+.lb li b{color:var(--amber)}
+.lb li small{grid-column:2/4;color:var(--muted);font-size:12px}
+button.small{font-family:var(--body);font-weight:600;font-size:13px;padding:7px 12px;margin-top:8px;background:transparent;color:var(--paper);border:1.5px solid var(--amber);border-radius:8px}
+button.small[hidden]{display:none}
 .chips{display:flex;flex-wrap:wrap;gap:6px;margin-left:auto}
 .chip{font-size:12px;padding:4px 9px;border-radius:999px;border:1.5px dashed var(--wall-top);color:var(--muted)}
 .chip.got{border-style:solid;border-color:var(--amber);background:var(--amber);color:var(--ink);font-weight:600}
@@ -106,6 +120,12 @@ button:focus-visible{outline:3px solid var(--paper);outline-offset:3px}
       <div class="diff" role="group" aria-label="Уровень сложности"></div>
       <p class="diffnote"></p>
       <button id="startBtn" type="button">Начать день</button>
+      <div class="lbwrap" hidden>
+        <label for="nick-menu">Имя для рейтинга <input id="nick-menu" class="nick" type="text" maxlength="16" autocomplete="nickname" placeholder="например, Лиза"></label>
+        <p class="lbstatus" role="status"></p>
+        <h3 class="lbtitle"></h3>
+        <ol class="lb"></ol>
+      </div>
     </div>
   </div>
   <div class="overlay" id="end" hidden>
@@ -116,11 +136,21 @@ button:focus-visible{outline:3px solid var(--paper);outline-offset:3px}
       <div class="diff" role="group" aria-label="Уровень сложности"></div>
       <p class="diffnote"></p>
       <button id="againBtn" type="button">Сыграть ещё</button>
+      <div class="lbwrap" hidden>
+        <label for="nick-end">Имя для рейтинга <input id="nick-end" class="nick" type="text" maxlength="16" autocomplete="nickname" placeholder="например, Лиза"></label>
+        <button class="small" id="sendBtn" type="button" hidden>Отправить результат в рейтинг</button>
+        <p class="lbstatus" role="status"></p>
+        <h3 class="lbtitle"></h3>
+        <ol class="lb"></ol>
+      </div>
     </div>
   </div>
 </main>
 <script>
 (function(){
+/* ===== Общий рейтинг (Supabase) =====
+   Впишите адрес проекта и публичный ключ (publishable или anon). Пока поля пустые, рейтинг скрыт. */
+const LB={url:'https://nmrskqclvauvtkgebxpi.supabase.co',key:'sb_publishable_NtbNqdmJF5zxFSdyhjch8Q_-I-xmJui',table:'scores'};
 const W=35,H=23;
 const DIFF={
   easy:{name:'Лёгкий',day:260,pv:.85,sight:.8,fish:12,guards:1,pen:6,ev:[45,60],note:'День 260 секунд, комендант и один вахтёр, много рыбки, события редкие.'},
@@ -464,6 +494,8 @@ function finish(win){
   $('endText').textContent=(win?'Лиза легла спать в '+clockText()+'.':'Дел сделано: '+n+' из 5.')
     +' Конспекты: '+S.notes+' из 5, котята: '+S.kHome+' из 3, поимок: '+S.caught+'. Уровень: '+DIFF[S.diff].name.toLowerCase()+'.';
   $('end').hidden=false;
+  lastRes={score:Math.max(-200,Math.min(400,score)),rank,win,diff:S.diff,sent:false};
+  if(lbOn()){if(nick.trim())lbSend();else{lbStatus('Введите имя, чтобы результат попал в рейтинг');$('sendBtn').hidden=false}lbFetch()}
 }
 
 function clockText(){
@@ -829,20 +861,74 @@ cv.addEventListener('pointermove',e=>{
 const up=()=>{if(ptr&&!ptr.swiped){S.want=-1;S.cur=-1}ptr=null};
 cv.addEventListener('pointerup',up);cv.addEventListener('pointercancel',()=>{ptr=null});
 
+/* ---------- общий рейтинг ---------- */
+let nick='',lastRes=null;
+try{nick=localStorage.getItem('liza-nick')||''}catch(e){}
+function lbOn(){return /^https:\/\//.test(LB.url)&&!!LB.key}
+function lbBase(){return LB.url.replace(/\/+$/,'')+'/rest/v1/'+LB.table}
+function lbStatus(t){document.querySelectorAll('.lbstatus').forEach(n=>{n.textContent=t})}
+function lbRender(rows,note){
+  document.querySelectorAll('.lbtitle').forEach(n=>{n.textContent='Рейтинг · '+DIFF[diff].name.toLowerCase()+' уровень'});
+  document.querySelectorAll('.lb').forEach(ol=>{
+    ol.textContent='';
+    if(note){const li=document.createElement('li'),sm=document.createElement('small');sm.textContent=note;li.appendChild(sm);ol.appendChild(li);return}
+    rows.forEach((r,i)=>{
+      const li=document.createElement('li'),a=document.createElement('span'),b=document.createElement('span'),c=document.createElement('b'),d=document.createElement('small');
+      a.textContent=(i+1)+'.';b.textContent=String(r.name);c.textContent=String(r.score);d.textContent=String(r.rank);
+      li.append(a,b,c,d);ol.appendChild(li);
+    });
+  });
+}
+let lbReq=0;
+async function lbFetch(){
+  if(!lbOn())return;
+  const my=++lbReq;lbRender([],'Загружаю рейтинг…');
+  try{
+    const r=await fetch(lbBase()+'?select=name,score,rank&diff=eq.'+diff+'&order=score.desc,created_at.asc&limit=10',{headers:{apikey:LB.key}});
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    const rows=await r.json();if(my!==lbReq)return;
+    if(rows.length)lbRender(rows);else lbRender([],'Пока никто не играл на этом уровне. Будьте первой!');
+  }catch(e){if(my===lbReq)lbRender([],'Рейтинг сейчас недоступен. Проверьте интернет и попробуйте позже.')}
+}
+async function lbSend(){
+  if(!lbOn()||!lastRes||lastRes.sent)return;
+  const name=nick.trim().slice(0,16);
+  if(!name){lbStatus('Введите имя, чтобы результат попал в рейтинг');return}
+  const res=lastRes;res.sent=true;$('sendBtn').hidden=true;lbStatus('Отправляю результат…');
+  try{
+    const r=await fetch(lbBase(),{method:'POST',headers:{apikey:LB.key,'Content-Type':'application/json',Prefer:'return=minimal'},
+      body:JSON.stringify({name,score:res.score,rank:res.rank,diff:res.diff,win:res.win})});
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    lbStatus('Результат записан: '+res.score+' баллов');lbFetch();
+  }catch(e){res.sent=false;$('sendBtn').hidden=false;lbStatus('Не получилось отправить результат. Нажмите кнопку, чтобы попробовать ещё раз.')}
+}
+function lbInit(){
+  if(!lbOn())return;
+  document.querySelectorAll('.lbwrap').forEach(n=>{n.hidden=false});
+  document.querySelectorAll('.nick').forEach(inp=>{
+    inp.value=nick;
+    inp.addEventListener('input',()=>{nick=inp.value;try{localStorage.setItem('liza-nick',nick)}catch(e){}
+      document.querySelectorAll('.nick').forEach(o=>{if(o!==inp)o.value=nick})});
+    inp.addEventListener('keydown',e=>e.stopPropagation());
+  });
+  $('sendBtn').addEventListener('click',lbSend);
+  lbFetch();
+}
 function renderDiff(){
   document.querySelectorAll('.diff').forEach(box=>{
     box.textContent='';
     Object.keys(DIFF).forEach(k=>{
       const b=document.createElement('button');b.type='button';b.textContent=DIFF[k].name;
       b.setAttribute('aria-pressed',String(k===diff));
-      b.addEventListener('click',()=>{diff=k;try{localStorage.setItem('liza-diff',k)}catch(e){}renderDiff()});
+      b.addEventListener('click',()=>{diff=k;try{localStorage.setItem('liza-diff',k)}catch(e){}renderDiff();lbFetch()});
       box.appendChild(b);
     });
   });
   document.querySelectorAll('.diffnote').forEach(n=>{n.textContent=DIFF[diff].note});
 }
 renderDiff();
-function play(){newGame();S.phase='play';hudKey='';$('menu').hidden=true;$('end').hidden=true;cv.focus&&cv.focus()}
+lbInit();
+function play(){lastRes=null;lbStatus('');$('sendBtn').hidden=true;newGame();S.phase='play';hudKey='';$('menu').hidden=true;$('end').hidden=true;cv.focus&&cv.focus()}
 $('startBtn').addEventListener('click',play);
 $('callBtn').addEventListener('click',()=>{callTim();$('callBtn').blur()});
 $('againBtn').addEventListener('click',play);
